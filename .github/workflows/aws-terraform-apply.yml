@@ -51,9 +51,7 @@ jobs:
 
   security:
     needs: [detect-changes, storage]
-    if: |
-      always() && !failure() && !cancelled() &&
-      contains(needs.detect-changes.outputs.modules, 'security')
+    if: always() && !failure() && !cancelled() && contains(needs.detect-changes.outputs.modules, 'security')
     uses: ./.github/workflows/_aws-terraform-apply-module.yml
     with:
       module: security
@@ -62,9 +60,7 @@ jobs:
 
   monitoring:
     needs: [detect-changes, storage]
-    if: |
-      always() && !failure() && !cancelled() &&
-      contains(needs.detect-changes.outputs.modules, 'monitoring')
+    if: always() && !failure() && !cancelled() && contains(needs.detect-changes.outputs.modules, 'monitoring')
     uses: ./.github/workflows/_aws-terraform-apply-module.yml
     with:
       module: monitoring
@@ -73,9 +69,7 @@ jobs:
 
   glue:
     needs: [detect-changes, storage, security]
-    if: |
-      always() && !failure() && !cancelled() &&
-      contains(needs.detect-changes.outputs.modules, 'glue')
+    if: always() && !failure() && !cancelled() && contains(needs.detect-changes.outputs.modules, 'glue')
     uses: ./.github/workflows/_aws-terraform-apply-module.yml
     with:
       module: glue
@@ -84,9 +78,7 @@ jobs:
 
   lambda:
     needs: [detect-changes, storage, security, monitoring, glue]
-    if: |
-      always() && !failure() && !cancelled() &&
-      contains(needs.detect-changes.outputs.modules, 'lambda')
+    if: always() && !failure() && !cancelled() && contains(needs.detect-changes.outputs.modules, 'lambda')
     uses: ./.github/workflows/_aws-terraform-apply-module.yml
     with:
       module: lambda
@@ -95,9 +87,7 @@ jobs:
 
   orchestration:
     needs: [detect-changes, storage, security, monitoring, glue, lambda]
-    if: |
-      always() && !failure() && !cancelled() &&
-      contains(needs.detect-changes.outputs.modules, 'orchestration')
+    if: always() && !failure() && !cancelled() && contains(needs.detect-changes.outputs.modules, 'orchestration')
     uses: ./.github/workflows/_aws-terraform-apply-module.yml
     with:
       module: orchestration

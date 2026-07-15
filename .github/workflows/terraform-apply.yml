@@ -56,9 +56,7 @@ jobs:
 
   security:
     needs: [detect-changes, storage]
-    if: |
-      always() && !failure() && !cancelled() &&
-      contains(needs.detect-changes.outputs.modules, 'security')
+    if: always() && !failure() && !cancelled() && contains(needs.detect-changes.outputs.modules, 'security')
     uses: ./.github/workflows/_terraform-apply-module.yml
     with:
       module: security
@@ -67,9 +65,7 @@ jobs:
 
   monitoring:
     needs: [detect-changes, storage]
-    if: |
-      always() && !failure() && !cancelled() &&
-      contains(needs.detect-changes.outputs.modules, 'monitoring')
+    if: always() && !failure() && !cancelled() && contains(needs.detect-changes.outputs.modules, 'monitoring')
     uses: ./.github/workflows/_terraform-apply-module.yml
     with:
       module: monitoring
@@ -78,9 +74,7 @@ jobs:
 
   databricks:
     needs: [detect-changes, storage]
-    if: |
-      always() && !failure() && !cancelled() &&
-      contains(needs.detect-changes.outputs.modules, 'databricks')
+    if: always() && !failure() && !cancelled() && contains(needs.detect-changes.outputs.modules, 'databricks')
     uses: ./.github/workflows/_terraform-apply-module.yml
     with:
       module: databricks
@@ -89,9 +83,7 @@ jobs:
 
   functions:
     needs: [detect-changes, storage, security, monitoring, databricks]
-    if: |
-      always() && !failure() && !cancelled() &&
-      contains(needs.detect-changes.outputs.modules, 'functions')
+    if: always() && !failure() && !cancelled() && contains(needs.detect-changes.outputs.modules, 'functions')
     uses: ./.github/workflows/_terraform-apply-module.yml
     with:
       module: functions
@@ -100,9 +92,7 @@ jobs:
 
   data-factory:
     needs: [detect-changes, storage, security, monitoring, databricks, functions]
-    if: |
-      always() && !failure() && !cancelled() &&
-      contains(needs.detect-changes.outputs.modules, 'data-factory')
+    if: always() && !failure() && !cancelled() && contains(needs.detect-changes.outputs.modules, 'data-factory')
     uses: ./.github/workflows/_terraform-apply-module.yml
     with:
       module: data-factory
