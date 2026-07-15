@@ -26,3 +26,4 @@ venv/
 # Large Kaggle historical datasets — kept locally, not in git (uploaded to
 # S3/ADLS via scripts/aws_copy.sh instead)
 data/*.csv
+aws/dashboard/streamlit.log
