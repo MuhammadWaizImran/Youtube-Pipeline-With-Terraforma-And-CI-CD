@@ -1,4 +1,4 @@
-name: (reusable) Terraform Apply — single module
+name: (reusable) Terraform Apply - single module
 
 on:
   workflow_call:
@@ -6,10 +6,6 @@ on:
       module:
         required: true
         type: string
-      extra_var_args:
-        required: false
-        type: string
-        default: ""
     secrets:
       AZURE_CLIENT_ID:
         required: true
@@ -21,6 +17,18 @@ on:
         required: true
       TFSTATE_STORAGE_ACCOUNT:
         required: true
+      YOUTUBE_API_KEY:
+        required: false
+      ALERT_EMAIL:
+        required: false
+      DATABRICKS_METASTORE_ID:
+        required: false
+      FUNCTION_KEY_INGESTION:
+        required: false
+      FUNCTION_KEY_JSON_TO_PARQUET:
+        required: false
+      FUNCTION_KEY_DATA_QUALITY:
+        required: false
 
 jobs:
   apply:
@@ -49,10 +57,29 @@ jobs:
             -backend-config="storage_account_name=${{ secrets.TFSTATE_STORAGE_ACCOUNT }}" \
             -backend-config="container_name=tfstate"
 
+      # GitHub Actions does not allow referencing the secrets context inside
+      # a with: block on a reusable-workflow-call job, so the
+      # module-specific -var flags are built here instead, inside a normal
+      # run: step, where the secrets context is valid.
+      - name: Build module-specific -var args
+        id: vars
+        run: |
+          ARGS=""
+          if [ "${{ inputs.module }}" != "storage" ]; then
+            ARGS="-var=tfstate_resource_group_name=${{ secrets.TFSTATE_RESOURCE_GROUP }} -var=tfstate_storage_account_name=${{ secrets.TFSTATE_STORAGE_ACCOUNT }}"
+          fi
+          case "${{ inputs.module }}" in
+            security)   ARGS="$ARGS -var=youtube_api_key=${{ secrets.YOUTUBE_API_KEY }}" ;;
+            monitoring) ARGS="$ARGS -var=alert_email=${{ secrets.ALERT_EMAIL }}" ;;
+            databricks) ARGS="$ARGS -var=metastore_id=${{ secrets.DATABRICKS_METASTORE_ID }}" ;;
+            data-factory) ARGS="$ARGS -var='function_keys={\"youtube-api-ingestion\"=\"${{ secrets.FUNCTION_KEY_INGESTION }}\",\"json-to-parquet\"=\"${{ secrets.FUNCTION_KEY_JSON_TO_PARQUET }}\",\"data-quality\"=\"${{ secrets.FUNCTION_KEY_DATA_QUALITY }}\"}'" ;;
+          esac
+          echo "args=$ARGS" >> "$GITHUB_OUTPUT"
+
       # This is where "small change != full rebuild" is actually enforced:
       # this job only ever targets its own module directory / state file,
       # so `terraform apply` here can never touch resources belonging to
       # another module.
       - name: Terraform Apply
         run: |
-          terraform apply -auto-approve -input=false ${{ inputs.extra_var_args }}
+          terraform apply -auto-approve -input=false ${{ steps.vars.outputs.args }}

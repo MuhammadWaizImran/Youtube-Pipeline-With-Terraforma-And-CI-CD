@@ -55,7 +55,6 @@ jobs:
     uses: ./.github/workflows/_aws-terraform-apply-module.yml
     with:
       module: security
-      extra_var_args: "-var=tfstate_bucket=${{ secrets.TFSTATE_BUCKET }} -var=tfstate_dynamodb_table=${{ secrets.TFSTATE_DYNAMODB_TABLE }}"
     secrets: inherit
 
   monitoring:
@@ -64,7 +63,6 @@ jobs:
     uses: ./.github/workflows/_aws-terraform-apply-module.yml
     with:
       module: monitoring
-      extra_var_args: "-var=alert_email=${{ secrets.ALERT_EMAIL }}"
     secrets: inherit
 
   glue:
@@ -73,7 +71,6 @@ jobs:
     uses: ./.github/workflows/_aws-terraform-apply-module.yml
     with:
       module: glue
-      extra_var_args: "-var=tfstate_bucket=${{ secrets.TFSTATE_BUCKET }} -var=tfstate_dynamodb_table=${{ secrets.TFSTATE_DYNAMODB_TABLE }}"
     secrets: inherit
 
   lambda:
@@ -82,7 +79,6 @@ jobs:
     uses: ./.github/workflows/_aws-terraform-apply-module.yml
     with:
       module: lambda
-      extra_var_args: "-var=tfstate_bucket=${{ secrets.TFSTATE_BUCKET }} -var=tfstate_dynamodb_table=${{ secrets.TFSTATE_DYNAMODB_TABLE }} -var=youtube_api_key=${{ secrets.YOUTUBE_API_KEY }}"
     secrets: inherit
 
   orchestration:
@@ -91,5 +87,4 @@ jobs:
     uses: ./.github/workflows/_aws-terraform-apply-module.yml
     with:
       module: orchestration
-      extra_var_args: "-var=tfstate_bucket=${{ secrets.TFSTATE_BUCKET }} -var=tfstate_dynamodb_table=${{ secrets.TFSTATE_DYNAMODB_TABLE }}"
     secrets: inherit

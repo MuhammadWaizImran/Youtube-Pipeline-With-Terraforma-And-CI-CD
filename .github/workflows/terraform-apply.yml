@@ -60,7 +60,6 @@ jobs:
     uses: ./.github/workflows/_terraform-apply-module.yml
     with:
       module: security
-      extra_var_args: "-var=tfstate_resource_group_name=${{ secrets.TFSTATE_RESOURCE_GROUP }} -var=tfstate_storage_account_name=${{ secrets.TFSTATE_STORAGE_ACCOUNT }} -var=youtube_api_key=${{ secrets.YOUTUBE_API_KEY }}"
     secrets: inherit
 
   monitoring:
@@ -69,7 +68,6 @@ jobs:
     uses: ./.github/workflows/_terraform-apply-module.yml
     with:
       module: monitoring
-      extra_var_args: "-var=tfstate_resource_group_name=${{ secrets.TFSTATE_RESOURCE_GROUP }} -var=tfstate_storage_account_name=${{ secrets.TFSTATE_STORAGE_ACCOUNT }} -var=alert_email=${{ secrets.ALERT_EMAIL }}"
     secrets: inherit
 
   databricks:
@@ -78,7 +76,6 @@ jobs:
     uses: ./.github/workflows/_terraform-apply-module.yml
     with:
       module: databricks
-      extra_var_args: "-var=tfstate_resource_group_name=${{ secrets.TFSTATE_RESOURCE_GROUP }} -var=tfstate_storage_account_name=${{ secrets.TFSTATE_STORAGE_ACCOUNT }} -var=metastore_id=${{ secrets.DATABRICKS_METASTORE_ID }}"
     secrets: inherit
 
   functions:
@@ -87,7 +84,6 @@ jobs:
     uses: ./.github/workflows/_terraform-apply-module.yml
     with:
       module: functions
-      extra_var_args: "-var=tfstate_resource_group_name=${{ secrets.TFSTATE_RESOURCE_GROUP }} -var=tfstate_storage_account_name=${{ secrets.TFSTATE_STORAGE_ACCOUNT }}"
     secrets: inherit
 
   data-factory:
@@ -96,8 +92,4 @@ jobs:
     uses: ./.github/workflows/_terraform-apply-module.yml
     with:
       module: data-factory
-      extra_var_args: >-
-        -var=tfstate_resource_group_name=${{ secrets.TFSTATE_RESOURCE_GROUP }}
-        -var=tfstate_storage_account_name=${{ secrets.TFSTATE_STORAGE_ACCOUNT }}
-        -var='function_keys={"youtube-api-ingestion"="${{ secrets.FUNCTION_KEY_INGESTION }}","json-to-parquet"="${{ secrets.FUNCTION_KEY_JSON_TO_PARQUET }}","data-quality"="${{ secrets.FUNCTION_KEY_DATA_QUALITY }}"}'
     secrets: inherit

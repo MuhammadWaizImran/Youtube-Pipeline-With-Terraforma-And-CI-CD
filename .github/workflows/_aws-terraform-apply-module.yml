@@ -1,4 +1,4 @@
-name: (reusable) AWS Terraform Apply — single module
+name: (reusable) AWS Terraform Apply - single module
 
 on:
   workflow_call:
@@ -6,10 +6,6 @@ on:
       module:
         required: true
         type: string
-      extra_var_args:
-        required: false
-        type: string
-        default: ""
     secrets:
       AWS_ROLE_ARN:
         required: true
@@ -17,6 +13,10 @@ on:
         required: true
       TFSTATE_DYNAMODB_TABLE:
         required: true
+      YOUTUBE_API_KEY:
+        required: false
+      ALERT_EMAIL:
+        required: false
 
 jobs:
   apply:
@@ -47,9 +47,27 @@ jobs:
             -backend-config="dynamodb_table=${{ secrets.TFSTATE_DYNAMODB_TABLE }}" \
             -backend-config="region=us-east-1"
 
+      # GitHub Actions does not allow referencing the secrets context inside
+      # a with: block on a reusable-workflow-call job (the caller can't pass
+      # "-var=...${{ secrets.X }}" through an input string), so the
+      # module-specific -var flags are built here instead, inside a normal
+      # run: step, where the secrets context is valid.
+      - name: Build module-specific -var args
+        id: vars
+        run: |
+          ARGS=""
+          if [ "${{ inputs.module }}" != "storage" ]; then
+            ARGS="-var=tfstate_bucket=${{ secrets.TFSTATE_BUCKET }} -var=tfstate_dynamodb_table=${{ secrets.TFSTATE_DYNAMODB_TABLE }}"
+          fi
+          case "${{ inputs.module }}" in
+            monitoring) ARGS="$ARGS -var=alert_email=${{ secrets.ALERT_EMAIL }}" ;;
+            lambda)     ARGS="$ARGS -var=youtube_api_key=${{ secrets.YOUTUBE_API_KEY }}" ;;
+          esac
+          echo "args=$ARGS" >> "$GITHUB_OUTPUT"
+
       # Same isolation principle as the Azure setup: this job only ever
       # targets its own module directory / state file, so a change here
       # can never touch another module's resources.
       - name: Terraform Apply
         run: |
-          terraform apply -auto-approve -input=false ${{ inputs.extra_var_args }}
+          terraform apply -auto-approve -input=false ${{ steps.vars.outputs.args }}
