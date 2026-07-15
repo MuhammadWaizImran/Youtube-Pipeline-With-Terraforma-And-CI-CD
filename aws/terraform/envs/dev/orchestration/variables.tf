@@ -13,7 +13,7 @@ variable "tfstate_region" {
 
 variable "schedule_expression" {
   type    = string
-  default = "rate(12 hours)"
+  default = "rate(6 hours)"
 }
 
 variable "schedule_enabled" {
