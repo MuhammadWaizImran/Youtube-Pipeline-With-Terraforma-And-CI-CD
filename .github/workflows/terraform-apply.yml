@@ -1,0 +1,113 @@
+name: Terraform Apply
+
+# Runs on merge to main. Applies ONLY the module(s) whose files changed —
+# each module is its own job, its own Terraform state file, and (via the
+# `dev` GitHub environment) can carry its own required-reviewer approval
+# gate. Jobs are chained in dependency order (storage -> security/monitoring
+# -> databricks -> functions -> data-factory) via `needs`, but a job that
+# has nothing to apply is skipped instantly (`if:` check), not run as a
+# no-op — so an unrelated module is never even touched.
+on:
+  push:
+    branches: [main]
+    paths:
+      - "azure/terraform/**"
+      - "azure/data_factory/**"
+
+permissions:
+  id-token: write
+  contents: read
+
+env:
+  TFSTATE_CONTAINER: tfstate
+
+jobs:
+  detect-changes:
+    runs-on: ubuntu-latest
+    outputs:
+      modules: ${{ steps.filter.outputs.changes }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: filter
+        uses: dorny/paths-filter@v3
+        with:
+          filters: |
+            storage:
+              - 'azure/terraform/envs/dev/storage/**'
+            security:
+              - 'azure/terraform/envs/dev/security/**'
+            monitoring:
+              - 'azure/terraform/envs/dev/monitoring/**'
+            databricks:
+              - 'azure/terraform/envs/dev/databricks/**'
+            functions:
+              - 'azure/terraform/envs/dev/functions/**'
+            data-factory:
+              - 'azure/terraform/envs/dev/data-factory/**'
+              - 'azure/data_factory/**'
+
+  storage:
+    needs: detect-changes
+    if: contains(needs.detect-changes.outputs.modules, 'storage')
+    uses: ./.github/workflows/_terraform-apply-module.yml
+    with:
+      module: storage
+    secrets: inherit
+
+  security:
+    needs: [detect-changes, storage]
+    if: |
+      always() && !failure() && !cancelled() &&
+      contains(needs.detect-changes.outputs.modules, 'security')
+    uses: ./.github/workflows/_terraform-apply-module.yml
+    with:
+      module: security
+      extra_var_args: "-var=tfstate_resource_group_name=${{ secrets.TFSTATE_RESOURCE_GROUP }} -var=tfstate_storage_account_name=${{ secrets.TFSTATE_STORAGE_ACCOUNT }} -var=youtube_api_key=${{ secrets.YOUTUBE_API_KEY }}"
+    secrets: inherit
+
+  monitoring:
+    needs: [detect-changes, storage]
+    if: |
+      always() && !failure() && !cancelled() &&
+      contains(needs.detect-changes.outputs.modules, 'monitoring')
+    uses: ./.github/workflows/_terraform-apply-module.yml
+    with:
+      module: monitoring
+      extra_var_args: "-var=tfstate_resource_group_name=${{ secrets.TFSTATE_RESOURCE_GROUP }} -var=tfstate_storage_account_name=${{ secrets.TFSTATE_STORAGE_ACCOUNT }} -var=alert_email=${{ secrets.ALERT_EMAIL }}"
+    secrets: inherit
+
+  databricks:
+    needs: [detect-changes, storage]
+    if: |
+      always() && !failure() && !cancelled() &&
+      contains(needs.detect-changes.outputs.modules, 'databricks')
+    uses: ./.github/workflows/_terraform-apply-module.yml
+    with:
+      module: databricks
+      extra_var_args: "-var=tfstate_resource_group_name=${{ secrets.TFSTATE_RESOURCE_GROUP }} -var=tfstate_storage_account_name=${{ secrets.TFSTATE_STORAGE_ACCOUNT }} -var=metastore_id=${{ secrets.DATABRICKS_METASTORE_ID }}"
+    secrets: inherit
+
+  functions:
+    needs: [detect-changes, storage, security, monitoring, databricks]
+    if: |
+      always() && !failure() && !cancelled() &&
+      contains(needs.detect-changes.outputs.modules, 'functions')
+    uses: ./.github/workflows/_terraform-apply-module.yml
+    with:
+      module: functions
+      extra_var_args: "-var=tfstate_resource_group_name=${{ secrets.TFSTATE_RESOURCE_GROUP }} -var=tfstate_storage_account_name=${{ secrets.TFSTATE_STORAGE_ACCOUNT }}"
+    secrets: inherit
+
+  data-factory:
+    needs: [detect-changes, storage, security, monitoring, databricks, functions]
+    if: |
+      always() && !failure() && !cancelled() &&
+      contains(needs.detect-changes.outputs.modules, 'data-factory')
+    uses: ./.github/workflows/_terraform-apply-module.yml
+    with:
+      module: data-factory
+      extra_var_args: >-
+        -var=tfstate_resource_group_name=${{ secrets.TFSTATE_RESOURCE_GROUP }}
+        -var=tfstate_storage_account_name=${{ secrets.TFSTATE_STORAGE_ACCOUNT }}
+        -var='function_keys={"youtube-api-ingestion"="${{ secrets.FUNCTION_KEY_INGESTION }}","json-to-parquet"="${{ secrets.FUNCTION_KEY_JSON_TO_PARQUET }}","data-quality"="${{ secrets.FUNCTION_KEY_DATA_QUALITY }}"}'
+    secrets: inherit

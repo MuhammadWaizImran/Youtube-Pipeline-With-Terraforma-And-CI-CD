@@ -1,0 +1,73 @@
+name: Deploy AWS Lambda Code
+
+# Handles the most common "chota change": editing one Lambda's Python
+# code. Never runs `terraform apply` — Terraform only owns the Lambda
+# function's shape (aws-terraform-apply.yml, `lambda` module); this
+# workflow pushes new code into an already-existing function via
+# `aws lambda update-function-code`, so nothing else in the infrastructure
+# is touched.
+on:
+  push:
+    branches: [main]
+    paths:
+      - "lambdas/**"
+      - "data_quality/**"
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  detect-changes:
+    runs-on: ubuntu-latest
+    outputs:
+      funcs: ${{ steps.filter.outputs.changes }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: filter
+        uses: dorny/paths-filter@v3
+        with:
+          filters: |
+            youtube-ingestion:
+              - 'lambdas/youtube_api_integstion/**'
+            json-to-parquet:
+              - 'lambdas/json_to_parquet/**'
+            data-quality:
+              - 'data_quality/**'
+
+  deploy:
+    needs: detect-changes
+    if: needs.detect-changes.outputs.funcs != '[]'
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        func: ${{ fromJSON(needs.detect-changes.outputs.funcs) }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: us-east-1
+
+      - name: Map matrix func to source dir + Lambda function name
+        id: map
+        run: |
+          case "${{ matrix.func }}" in
+            youtube-ingestion)  DIR="lambdas/youtube_api_integstion";  NAME="yt-data-pipeline-youtube-ingestion-dev" ;;
+            json-to-parquet)    DIR="lambdas/json_to_parquet";          NAME="yt-data-pipeline-json-to-parquet-dev" ;;
+            data-quality)       DIR="data_quality";                     NAME="yt-data-pipeline-data-quality-dev" ;;
+          esac
+          echo "dir=$DIR" >> "$GITHUB_OUTPUT"
+          echo "name=$NAME" >> "$GITHUB_OUTPUT"
+
+      - name: Zip function code
+        run: |
+          cd "${{ steps.map.outputs.dir }}"
+          zip -r "$OLDPWD/${{ matrix.func }}.zip" . -x "*.git*"
+
+      - name: Deploy to Lambda
+        run: |
+          aws lambda update-function-code \
+            --function-name "${{ steps.map.outputs.name }}" \
+            --zip-file "fileb://${{ matrix.func }}.zip"

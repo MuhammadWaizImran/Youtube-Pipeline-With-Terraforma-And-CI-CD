@@ -1,0 +1,51 @@
+name: Deploy Databricks Jobs Code
+
+# Handles the other common "chota change": editing a PySpark job. Pushes
+# the changed .py file straight to DBFS via the Databricks CLI — no
+# Terraform involved, so the Databricks workspace/cluster-policy/warehouse
+# infrastructure (owned by terraform-apply.yml's `databricks` module) is
+# never touched by a pure code change.
+on:
+  push:
+    branches: [main]
+    paths:
+      - "azure/databricks_jobs/**"
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Install Databricks CLI
+        run: curl -fsSL https://raw.githubusercontent.com/databricks/setup-cli/main/install.sh | sh
+
+      - name: Get changed job files
+        id: changed
+        uses: tj-actions/changed-files@v44
+        with:
+          files: azure/databricks_jobs/**/*.py
+
+      - name: Upload changed jobs to DBFS
+        if: steps.changed.outputs.any_changed == 'true'
+        env:
+          DATABRICKS_HOST: ${{ secrets.DATABRICKS_HOST }}
+          DATABRICKS_AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+          DATABRICKS_AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+          DATABRICKS_AZURE_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
+        run: |
+          for f in ${{ steps.changed.outputs.all_changed_files }}; do
+            name=$(basename "$f")
+            echo "Uploading $name"
+            databricks fs cp "$f" "dbfs:/databricks_jobs/$name" --overwrite
+          done

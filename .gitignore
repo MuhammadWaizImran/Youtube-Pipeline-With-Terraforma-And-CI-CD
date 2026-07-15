@@ -1,0 +1,28 @@
+# Terraform
+**/.terraform/
+*.tfstate
+*.tfstate.*
+*.tfplan
+tfplan
+.terraform.tfstate.lock.info
+crash.log
+crash.*.log
+override.tf
+override.tf.json
+*_override.tf
+*_override.tf.json
+
+# Function deployment packages
+azure/functions/*.zip
+aws/terraform/modules/lambda/.build/
+*.zip
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# Large Kaggle historical datasets — kept locally, not in git (uploaded to
+# S3/ADLS via scripts/aws_copy.sh instead)
+data/*.csv

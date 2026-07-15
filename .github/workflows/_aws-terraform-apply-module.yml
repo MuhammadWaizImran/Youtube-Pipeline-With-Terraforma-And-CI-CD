@@ -1,0 +1,55 @@
+name: (reusable) AWS Terraform Apply — single module
+
+on:
+  workflow_call:
+    inputs:
+      module:
+        required: true
+        type: string
+      extra_var_args:
+        required: false
+        type: string
+        default: ""
+    secrets:
+      AWS_ROLE_ARN:
+        required: true
+      TFSTATE_BUCKET:
+        required: true
+      TFSTATE_DYNAMODB_TABLE:
+        required: true
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    environment: dev
+    permissions:
+      id-token: write
+      contents: read
+    defaults:
+      run:
+        working-directory: aws/terraform/envs/dev/${{ inputs.module }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: us-east-1
+
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "1.7.5"
+
+      - name: Terraform Init
+        run: |
+          terraform init \
+            -backend-config="bucket=${{ secrets.TFSTATE_BUCKET }}" \
+            -backend-config="dynamodb_table=${{ secrets.TFSTATE_DYNAMODB_TABLE }}" \
+            -backend-config="region=us-east-1"
+
+      # Same isolation principle as the Azure setup: this job only ever
+      # targets its own module directory / state file, so a change here
+      # can never touch another module's resources.
+      - name: Terraform Apply
+        run: |
+          terraform apply -auto-approve -input=false ${{ inputs.extra_var_args }}

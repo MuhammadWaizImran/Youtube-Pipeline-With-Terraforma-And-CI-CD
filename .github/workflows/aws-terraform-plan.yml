@@ -1,0 +1,115 @@
+name: AWS Terraform Plan
+
+# Runs on every PR. Only plans the module directory(ies) that actually
+# changed — the EventBridge-schedule-only-change example the user asked
+# about lands entirely inside `orchestration`, so this only plans that one
+# module; storage/lambda/glue/security jobs are skipped, not no-op'd.
+on:
+  pull_request:
+    paths:
+      - "aws/terraform/**"
+      - "aws/step_functions/**"
+
+permissions:
+  id-token: write
+  contents: read
+  pull-requests: write
+
+env:
+  TF_VERSION: "1.7.5"
+
+jobs:
+  detect-changes:
+    runs-on: ubuntu-latest
+    outputs:
+      modules: ${{ steps.filter.outputs.changes }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: filter
+        uses: dorny/paths-filter@v3
+        with:
+          filters: |
+            storage:
+              - 'aws/terraform/envs/dev/storage/**'
+            security:
+              - 'aws/terraform/envs/dev/security/**'
+            monitoring:
+              - 'aws/terraform/envs/dev/monitoring/**'
+            glue:
+              - 'aws/terraform/envs/dev/glue/**'
+            lambda:
+              - 'aws/terraform/envs/dev/lambda/**'
+            orchestration:
+              - 'aws/terraform/envs/dev/orchestration/**'
+              - 'aws/step_functions/**'
+
+  plan:
+    needs: detect-changes
+    if: needs.detect-changes.outputs.modules != '[]'
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        module: ${{ fromJSON(needs.detect-changes.outputs.modules) }}
+    permissions:
+      id-token: write
+      contents: read
+      pull-requests: write
+    defaults:
+      run:
+        working-directory: aws/terraform/envs/dev/${{ matrix.module }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: us-east-1
+
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+
+      - name: Terraform Init
+        run: |
+          terraform init \
+            -backend-config="bucket=${{ secrets.TFSTATE_BUCKET }}" \
+            -backend-config="dynamodb_table=${{ secrets.TFSTATE_DYNAMODB_TABLE }}" \
+            -backend-config="region=us-east-1"
+
+      - name: Build module-specific -var args
+        id: vars
+        run: |
+          ARGS=""
+          if [ "${{ matrix.module }}" != "storage" ]; then
+            ARGS="-var=tfstate_bucket=${{ secrets.TFSTATE_BUCKET }} -var=tfstate_dynamodb_table=${{ secrets.TFSTATE_DYNAMODB_TABLE }}"
+          fi
+          case "${{ matrix.module }}" in
+            monitoring) ARGS="$ARGS -var=alert_email=${{ secrets.ALERT_EMAIL }}" ;;
+            lambda)     ARGS="$ARGS -var=youtube_api_key=${{ secrets.YOUTUBE_API_KEY }}" ;;
+          esac
+          echo "args=$ARGS" >> "$GITHUB_OUTPUT"
+
+      - name: Terraform Plan
+        id: plan
+        run: |
+          terraform plan -no-color -input=false ${{ steps.vars.outputs.args }} \
+            -out=tfplan 2>&1 | tee plan_output.txt
+        continue-on-error: true
+
+      - name: Post plan as PR comment
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const output = fs.readFileSync('aws/terraform/envs/dev/${{ matrix.module }}/plan_output.txt', 'utf8').slice(-60000);
+            const body = `#### AWS Terraform Plan — \`${{ matrix.module }}\`\n<details><summary>Show plan</summary>\n\n\`\`\`\n${output}\n\`\`\`\n</details>`;
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body,
+            });
+
+      - name: Fail if plan errored
+        if: steps.plan.outcome == 'failure'
+        run: exit 1

@@ -1,0 +1,141 @@
+[
+  {
+    "name": "IngestFromYouTubeAPI",
+    "type": "AzureFunctionActivity",
+    "typeProperties": {
+      "functionName": "youtube_api_ingestion",
+      "method": "POST",
+      "body": {
+        "triggered_by": "adf",
+        "run_id": "@pipeline().RunId"
+      }
+    },
+    "linkedServiceName": { "referenceName": "ls-youtube-api-ingestion", "type": "LinkedServiceReference" },
+    "policy": { "timeout": "0.00:10:00", "retry": 3, "retryIntervalInSeconds": 30 }
+  },
+  {
+    "name": "NotifyIngestionFailure",
+    "type": "Fail",
+    "dependsOn": [{ "activity": "IngestFromYouTubeAPI", "dependencyConditions": ["Failed"] }],
+    "typeProperties": {
+      "message": "[YT Pipeline] FAILURE - Ingestion step failed: @{activity('IngestFromYouTubeAPI').Error.message}",
+      "errorCode": "IngestionFailed"
+    }
+  },
+  {
+    "name": "WaitForS3Consistency",
+    "type": "Wait",
+    "dependsOn": [{ "activity": "IngestFromYouTubeAPI", "dependencyConditions": ["Succeeded"] }],
+    "typeProperties": { "waitTimeInSeconds": 10 }
+  },
+  {
+    "name": "TransformReferenceData",
+    "type": "AzureFunctionActivity",
+    "dependsOn": [{ "activity": "WaitForS3Consistency", "dependencyConditions": ["Succeeded"] }],
+    "typeProperties": {
+      "functionName": "json_to_parquet",
+      "method": "POST",
+      "body": { "triggered_by": "adf" }
+    },
+    "linkedServiceName": { "referenceName": "ls-json-to-parquet", "type": "LinkedServiceReference" },
+    "policy": { "timeout": "0.00:10:00", "retry": 2, "retryIntervalInSeconds": 15 }
+  },
+  {
+    "name": "NotifyTransformReferenceFailure",
+    "type": "Fail",
+    "dependsOn": [{ "activity": "TransformReferenceData", "dependencyConditions": ["Failed"] }],
+    "typeProperties": {
+      "message": "[YT Pipeline] FAILURE - Reference data transform failed: @{activity('TransformReferenceData').Error.message}",
+      "errorCode": "TransformFailed"
+    }
+  },
+  {
+    "name": "RunBronzeToSilverDatabricksJob",
+    "type": "DatabricksSparkPython",
+    "dependsOn": [{ "activity": "WaitForS3Consistency", "dependencyConditions": ["Succeeded"] }],
+    "typeProperties": {
+      "pythonFile": "dbfs:/databricks_jobs/bronze_to_silver_statistics.py",
+      "parameters": [
+        "--bronze_catalog", "ytpipeline_bronze_dev",
+        "--bronze_table", "raw_statistics",
+        "--silver_catalog", "ytpipeline_silver_dev",
+        "--silver_table", "clean_statistics"
+      ]
+    },
+    "linkedServiceName": { "referenceName": "ls-databricks", "type": "LinkedServiceReference" },
+    "policy": { "timeout": "1.00:00:00", "retry": 2, "retryIntervalInSeconds": 60 }
+  },
+  {
+    "name": "NotifyBronzeToSilverFailure",
+    "type": "Fail",
+    "dependsOn": [{ "activity": "RunBronzeToSilverDatabricksJob", "dependencyConditions": ["Failed"] }],
+    "typeProperties": {
+      "message": "[YT Pipeline] FAILURE - Bronze->Silver Databricks job failed: @{activity('RunBronzeToSilverDatabricksJob').Error.message}",
+      "errorCode": "BronzeToSilverFailed"
+    }
+  },
+  {
+    "name": "RunDataQualityChecks",
+    "type": "AzureFunctionActivity",
+    "dependsOn": [
+      { "activity": "TransformReferenceData", "dependencyConditions": ["Succeeded"] },
+      { "activity": "RunBronzeToSilverDatabricksJob", "dependencyConditions": ["Succeeded"] }
+    ],
+    "typeProperties": {
+      "functionName": "data_quality",
+      "method": "POST",
+      "body": {
+        "layer": "silver",
+        "catalog": "ytpipeline_silver_dev",
+        "tables": ["clean_statistics", "clean_reference_data"]
+      }
+    },
+    "linkedServiceName": { "referenceName": "ls-data-quality", "type": "LinkedServiceReference" },
+    "policy": { "timeout": "0.00:10:00", "retry": 2, "retryIntervalInSeconds": 15 }
+  },
+  {
+    "name": "EvaluateDataQuality",
+    "type": "IfCondition",
+    "dependsOn": [{ "activity": "RunDataQualityChecks", "dependencyConditions": ["Succeeded"] }],
+    "typeProperties": {
+      "expression": {
+        "type": "Expression",
+        "value": "@equals(activity('RunDataQualityChecks').output.quality_passed, true)"
+      },
+      "ifTrueActivities": [
+        {
+          "name": "RunSilverToGoldDatabricksJob",
+          "type": "DatabricksSparkPython",
+          "typeProperties": {
+            "pythonFile": "dbfs:/databricks_jobs/silver_to_gold_analytics.py",
+            "parameters": [
+              "--silver_catalog", "ytpipeline_silver_dev",
+              "--gold_catalog", "ytpipeline_gold_dev"
+            ]
+          },
+          "linkedServiceName": { "referenceName": "ls-databricks", "type": "LinkedServiceReference" },
+          "policy": { "timeout": "1.00:00:00", "retry": 2, "retryIntervalInSeconds": 60 }
+        },
+        {
+          "name": "NotifyGoldFailure",
+          "type": "Fail",
+          "dependsOn": [{ "activity": "RunSilverToGoldDatabricksJob", "dependencyConditions": ["Failed"] }],
+          "typeProperties": {
+            "message": "[YT Pipeline] FAILURE - Silver->Gold Databricks job failed: @{activity('RunSilverToGoldDatabricksJob').Error.message}",
+            "errorCode": "SilverToGoldFailed"
+          }
+        }
+      ],
+      "ifFalseActivities": [
+        {
+          "name": "NotifyDQFailure",
+          "type": "Fail",
+          "typeProperties": {
+            "message": "[YT Pipeline] WARNING - Data quality checks failed: @{string(activity('RunDataQualityChecks').output.details)}",
+            "errorCode": "DataQualityFailed"
+          }
+        }
+      ]
+    }
+  }
+]

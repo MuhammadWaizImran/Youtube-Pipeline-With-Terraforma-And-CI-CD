@@ -1,0 +1,42 @@
+name: Deploy AWS Glue Job Code
+
+# The other common "chota change": editing a PySpark job. Uploads the
+# changed script straight to the scripts S3 bucket via `aws s3 cp` — the
+# `glue` module's Terraform state deliberately ignores content changes on
+# these objects (lifecycle.ignore_changes), so this never triggers
+# `terraform apply`.
+on:
+  push:
+    branches: [main]
+    paths:
+      - "glue_jobs/**"
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: us-east-1
+
+      - name: Get changed job files
+        id: changed
+        uses: tj-actions/changed-files@v44
+        with:
+          files: glue_jobs/**/*.py
+
+      - name: Upload changed jobs to S3
+        if: steps.changed.outputs.any_changed == 'true'
+        run: |
+          for f in ${{ steps.changed.outputs.all_changed_files }}; do
+            name=$(basename "$f")
+            echo "Uploading $name"
+            aws s3 cp "$f" "s3://${{ secrets.SCRIPTS_BUCKET_NAME }}/glue_jobs/$name"
+          done
