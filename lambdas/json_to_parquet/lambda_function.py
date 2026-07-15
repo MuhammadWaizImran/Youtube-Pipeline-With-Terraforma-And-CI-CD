@@ -38,6 +38,8 @@ GLUE_DB = os.environ.get("GLUE_DB_SILVER", "yt_pipeline_silver_dev")
 GLUE_TABLE = os.environ.get("GLUE_TABLE_REFERENCE", "clean_reference_data")
 SNS_TOPIC = os.environ.get("SNS_ALERT_TOPIC_ARN", "")
 SILVER_PATH = f"s3://{SILVER_BUCKET}/youtube/reference_data/"
+BRONZE_BUCKET = os.environ.get("S3_BUCKET_BRONZE", "")
+REGIONS = os.environ.get("YOUTUBE_REGIONS", "US,GB,CA,DE,FR,IN,JP,KR,MX,RU").split(",")
 
 s3_client = boto3.client("s3")
 sns_client = boto3.client("sns")
@@ -86,78 +88,96 @@ def send_alert(subject: str, message: str):
         sns_client.publish(TopicArn=SNS_TOPIC, Subject=subject[:100], Message=message)
 
 
-def lambda_handler(event, context):
-    """Process S3 event for new JSON reference files."""
+def process_key(bucket: str, key: str) -> dict:
+    """Read one Bronze reference-data JSON file and write it to Silver as Parquet."""
+    logger.info(f"Processing: s3://{bucket}/{key}")
 
-    # Handle both direct S3 events and EventBridge-wrapped events
+    # ── Read raw JSON ────────────────────────────────────────────
+    # We use boto3 + json.loads instead of wr.s3.read_json() because
+    # the category JSON has mixed types (strings like "kind"/"etag"
+    # alongside a nested "items" array) which causes pandas to fail
+    # with: "Mixing dicts with non-Series may lead to ambiguous ordering"
+    raw_data = read_json_from_s3(bucket, key)
+
+    # The YouTube/Kaggle JSON has { "kind": "...", "items": [...] }
+    # We only care about the items array
+    if "items" in raw_data and isinstance(raw_data["items"], list):
+        df = pd.json_normalize(raw_data["items"])
+    else:
+        # Fallback: try to normalize the entire object
+        df = pd.json_normalize(raw_data)
+
+    logger.info(f"  Raw shape: {df.shape}")
+
+    # ── Validate ─────────────────────────────────────────────────
+    df = validate_category_data(df)
+
+    # ── Add metadata columns ─────────────────────────────────────
+    df["_ingestion_timestamp"] = datetime.now(timezone.utc).isoformat()
+    df["_source_file"] = key
+
+    # Extract region from the S3 key (e.g., region=US)
+    region = "unknown"
+    for part in key.split("/"):
+        if part.startswith("region="):
+            region = part.split("=")[1]
+            break
+    df["region"] = region
+
+    logger.info(f"  Clean shape: {df.shape}, region: {region}")
+
+    # ── Write to Silver layer as Parquet ─────────────────────────
+    wr.s3.to_parquet(
+        df=df,
+        path=SILVER_PATH,
+        dataset=True,
+        database=GLUE_DB,
+        table=GLUE_TABLE,
+        partition_cols=["region"],
+        mode="overwrite_partitions",  # Idempotent per region
+        schema_evolution=True,
+    )
+
+    logger.info(f"  Written to Silver: {SILVER_PATH}")
+    return {"key": key, "region": region, "rows": len(df)}
+
+
+def lambda_handler(event, context):
+    """Process new JSON reference files — either an S3 event notification,
+    or a direct Step Functions invocation (no Records), in which case we
+    process today's reference-data file for every configured region."""
+
     records = event.get("Records", [])
-    if not records:
-        # Could be invoked directly by Step Functions
-        records = [event] if "s3" in event else []
+    if records:
+        keys = [
+            (r["s3"]["bucket"]["name"], unquote_plus(r["s3"]["object"]["key"]))
+            for r in records
+        ]
+    elif "s3" in event:
+        keys = [(event["s3"]["bucket"]["name"], unquote_plus(event["s3"]["object"]["key"]))]
+    else:
+        # Direct Step Functions invocation — no S3 event payload available,
+        # so build today's expected key per region (mirrors the ingestion
+        # Lambda's write path).
+        date_partition = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        keys = [
+            (
+                BRONZE_BUCKET,
+                f"youtube/raw_statistics_reference_data/region={r.strip().lower()}/"
+                f"date={date_partition}/{r.strip().lower()}_category_id.json",
+            )
+            for r in REGIONS
+        ]
 
     processed = []
     errors = []
 
-    for record in records:
+    for bucket, key in keys:
         try:
-            s3_info = record["s3"]
-            bucket = s3_info["bucket"]["name"]
-            key = unquote_plus(s3_info["object"]["key"])
-
-            logger.info(f"Processing: s3://{bucket}/{key}")
-
-            # ── Read raw JSON ────────────────────────────────────────────
-            # We use boto3 + json.loads instead of wr.s3.read_json() because
-            # the category JSON has mixed types (strings like "kind"/"etag"
-            # alongside a nested "items" array) which causes pandas to fail
-            # with: "Mixing dicts with non-Series may lead to ambiguous ordering"
-            raw_data = read_json_from_s3(bucket, key)
-
-            # The YouTube/Kaggle JSON has { "kind": "...", "items": [...] }
-            # We only care about the items array
-            if "items" in raw_data and isinstance(raw_data["items"], list):
-                df = pd.json_normalize(raw_data["items"])
-            else:
-                # Fallback: try to normalize the entire object
-                df = pd.json_normalize(raw_data)
-
-            logger.info(f"  Raw shape: {df.shape}")
-
-            # ── Validate ─────────────────────────────────────────────────
-            df = validate_category_data(df)
-
-            # ── Add metadata columns ─────────────────────────────────────
-            df["_ingestion_timestamp"] = datetime.now(timezone.utc).isoformat()
-            df["_source_file"] = key
-
-            # Extract region from the S3 key (e.g., region=US)
-            region = "unknown"
-            for part in key.split("/"):
-                if part.startswith("region="):
-                    region = part.split("=")[1]
-                    break
-            df["region"] = region
-
-            logger.info(f"  Clean shape: {df.shape}, region: {region}")
-
-            # ── Write to Silver layer as Parquet ─────────────────────────
-            wr_response = wr.s3.to_parquet(
-                df=df,
-                path=SILVER_PATH,
-                dataset=True,
-                database=GLUE_DB,
-                table=GLUE_TABLE,
-                partition_cols=["region"],
-                mode="overwrite_partitions",  # Idempotent per region
-                schema_evolution=True,
-            )
-
-            logger.info(f"  Written to Silver: {SILVER_PATH}")
-            processed.append({"key": key, "region": region, "rows": len(df)})
-
+            processed.append(process_key(bucket, key))
         except Exception as e:
-            logger.error(f"Error processing record: {e}", exc_info=True)
-            errors.append({"key": key if "key" in dir() else "unknown", "error": str(e)})
+            logger.error(f"Error processing {bucket}/{key}: {e}", exc_info=True)
+            errors.append({"key": key, "error": str(e)})
 
     # ── Summary ──────────────────────────────────────────────────────────
     if errors:
