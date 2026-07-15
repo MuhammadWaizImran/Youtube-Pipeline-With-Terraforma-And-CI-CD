@@ -13,3 +13,7 @@ output "silver_to_gold_job_name" {
 output "athena_workgroup_name" {
   value = aws_athena_workgroup.this.name
 }
+
+output "bronze_crawler_name" {
+  value = aws_glue_crawler.bronze_statistics.name
+}

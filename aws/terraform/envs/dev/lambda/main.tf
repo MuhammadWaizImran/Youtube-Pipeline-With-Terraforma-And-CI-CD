@@ -61,6 +61,7 @@ module "lambda" {
   bronze_bucket_name = data.terraform_remote_state.storage.outputs.bucket_names["bronze"]
   silver_bucket_name = data.terraform_remote_state.storage.outputs.bucket_names["silver"]
   silver_database    = data.terraform_remote_state.glue.outputs.database_names["silver"]
+  athena_workgroup   = data.terraform_remote_state.glue.outputs.athena_workgroup_name
 
   youtube_api_key = var.youtube_api_key
   sns_topic_arn   = data.terraform_remote_state.monitoring.outputs.sns_topic_arn

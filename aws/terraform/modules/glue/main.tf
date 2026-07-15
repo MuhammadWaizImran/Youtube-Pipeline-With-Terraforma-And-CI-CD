@@ -85,6 +85,38 @@ resource "aws_glue_job" "silver_to_gold" {
   tags = var.tags
 }
 
+// Discovers the "raw_statistics" table from the Bronze JSON the ingestion
+// Lambda writes — the Glue ETL job (bronze_to_silver_statistics.py) reads
+// from this catalog table via create_dynamic_frame.from_catalog(), which
+// fails with EntityNotFoundException until this table exists. Re-run this
+// crawler (aws glue start-crawler) whenever the Bronze JSON shape changes.
+resource "aws_glue_crawler" "bronze_statistics" {
+  name          = "${var.project}-bronze-statistics-crawler-${var.env}"
+  role          = var.glue_role_arn
+  database_name = aws_glue_catalog_database.layers["bronze"].name
+
+  s3_target {
+    path = "s3://${var.bronze_bucket_name}/youtube/raw_statistics/"
+  }
+
+  configuration = jsonencode({
+    Version = 1.0
+    Grouping = {
+      TableGroupingPolicy = "CombineCompatibleSchemas"
+    }
+    CrawlerOutput = {
+      Tables = { AddOrUpdateBehavior = "MergeNewColumns" }
+    }
+  })
+
+  schema_change_policy {
+    update_behavior = "UPDATE_IN_DATABASE"
+    delete_behavior = "LOG"
+  }
+
+  tags = var.tags
+}
+
 resource "aws_athena_workgroup" "this" {
   name = "${var.project}-${var.env}"
 

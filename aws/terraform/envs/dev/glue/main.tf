@@ -36,6 +36,7 @@ module "glue" {
   env                 = "dev"
   glue_role_arn       = data.terraform_remote_state.security.outputs.glue_role_arn
   scripts_bucket_name = data.terraform_remote_state.storage.outputs.bucket_names["scripts"]
+  bronze_bucket_name  = data.terraform_remote_state.storage.outputs.bucket_names["bronze"]
   silver_bucket_name  = data.terraform_remote_state.storage.outputs.bucket_names["silver"]
   gold_bucket_name    = data.terraform_remote_state.storage.outputs.bucket_names["gold"]
 

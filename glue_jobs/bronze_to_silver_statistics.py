@@ -88,6 +88,34 @@ logger.info(f"Bronze records read: {initial_count}")
 if initial_count == 0:
     logger.info("No new records to process. Committing empty job.")
 else:
+    # Each Bronze file is one YouTube API response — {"items": [...]} — not
+    # one row per video. Explode "items" first so every downstream row is a
+    # single video, and re-expose the nested snippet/statistics leaf fields
+    # as literal dotted column names ("snippet.title", etc.) so the existing
+    # flatten logic below (which looks up those literal names) keeps working
+    # unchanged.
+    if "items" in df.columns:
+        logger.info("Detected items-array wrapper — exploding to one row per video...")
+        passthrough_cols = [c for c in df.columns if c != "items"]
+        df = df.select(*passthrough_cols, F.explode("items").alias("item"))
+        df = df.select(
+            *passthrough_cols,
+            F.col("item.id").alias("id"),
+            F.col("item.snippet.title").alias("snippet.title"),
+            F.col("item.snippet.channelTitle").alias("snippet.channelTitle"),
+            F.col("item.snippet.categoryId").alias("snippet.categoryId"),
+            F.col("item.snippet.publishedAt").alias("snippet.publishedAt"),
+            F.col("item.snippet.tags").alias("snippet.tags"),
+            F.col("item.snippet.description").alias("snippet.description"),
+            F.col("item.snippet.thumbnails.default.url").alias("snippet.thumbnails.default.url"),
+            F.col("item.statistics.viewCount").alias("statistics.viewCount"),
+            F.col("item.statistics.likeCount").alias("statistics.likeCount"),
+            F.col("item.statistics.dislikeCount").alias("statistics.dislikeCount"),
+            F.col("item.statistics.commentCount").alias("statistics.commentCount"),
+        )
+        initial_count = df.count()
+        logger.info(f"Exploded to {initial_count} per-video records")
+
     # ── Step 2: Schema Enforcement ──────────────────────────────────────────
     logger.info("Enforcing schema and casting types...")
 

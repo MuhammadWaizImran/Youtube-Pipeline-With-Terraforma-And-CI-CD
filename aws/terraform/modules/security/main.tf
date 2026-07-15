@@ -125,13 +125,13 @@ resource "aws_iam_role_policy" "lambda_dq" {
       {
         Sid      = "AthenaAccess"
         Effect   = "Allow"
-        Action   = ["athena:StartQueryExecution", "athena:GetQueryExecution", "athena:GetQueryResults"]
+        Action   = ["athena:StartQueryExecution", "athena:GetQueryExecution", "athena:GetQueryResults", "athena:GetWorkGroup"]
         Resource = "*"
       },
       {
         Sid    = "S3Access"
         Effect = "Allow"
-        Action = ["s3:GetObject", "s3:PutObject", "s3:ListBucket"]
+        Action = ["s3:GetObject", "s3:PutObject", "s3:ListBucket", "s3:GetBucketLocation"]
         Resource = [
           var.silver_bucket_arn, "${var.silver_bucket_arn}/*",
           var.scripts_bucket_arn, "${var.scripts_bucket_arn}/*",
@@ -140,7 +140,7 @@ resource "aws_iam_role_policy" "lambda_dq" {
       {
         Sid      = "GlueAccess"
         Effect   = "Allow"
-        Action   = ["glue:GetTable", "glue:GetDatabase"]
+        Action   = ["glue:GetTable", "glue:GetDatabase", "glue:GetPartitions"]
         Resource = "*"
       },
       {

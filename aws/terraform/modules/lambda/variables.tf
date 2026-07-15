@@ -68,6 +68,10 @@ variable "reference_table_name" {
   default = "clean_reference_data"
 }
 
+variable "athena_workgroup" {
+  type = string
+}
+
 variable "dq_min_row_count" {
   type    = number
   default = 10
